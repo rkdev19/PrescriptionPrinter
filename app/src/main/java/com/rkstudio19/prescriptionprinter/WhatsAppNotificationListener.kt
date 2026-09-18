@@ -56,16 +56,27 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             .extractMessagingStyleFromNotification(sbn.notification)
 
         if (messagingStyle != null) {
-            handleMessagingStyle(messagingStyle, sbn.postTime)
+            val notificationTitle = sbn.notification.extras
+                .getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
+            handleMessagingStyle(messagingStyle, sbn.postTime, notificationTitle)
         } else {
             Log.d(TAG, "Notification has no MessagingStyle payload, skipping")
         }
     }
 
-    private fun handleMessagingStyle(style: NotificationCompat.MessagingStyle, postTimeMs: Long) {
+    private fun handleMessagingStyle(
+        style: NotificationCompat.MessagingStyle,
+        postTimeMs: Long,
+        notificationTitle: String?
+    ) {
         for (message in style.messages) {
+            // For 1-on-1 chats WhatsApp often leaves message.person empty
+            // (only groups reliably tag the individual sender per-message)
+            // - the notification's own title is the contact's name in
+            // that case, so fall back to it before giving up to "Unknown".
             val sender = message.person?.name?.toString()
                 ?: style.conversationTitle?.toString()
+                ?: notificationTitle
                 ?: "Unknown"
             val timestamp = message.timestamp
             val text = message.text?.toString()
