@@ -30,7 +30,7 @@ class PrintQueueManager(private val context: Context) {
 
     companion object {
         private const val TAG = "PrintQueueManager"
-        private const val LONE_ITEM_TIMEOUT_MS = 3 * 60 * 1000L // 3 minutes
+        private const val LONE_ITEM_TIMEOUT_MS = 15 * 1000L // 15 seconds
     }
 
     /** Call this whenever the accessibility service detects a new image or text. */

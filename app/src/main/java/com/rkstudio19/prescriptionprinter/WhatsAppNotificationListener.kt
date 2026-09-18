@@ -1,7 +1,5 @@
 package com.rkstudio19.prescriptionprinter
 
-import android.content.ContentUris
-import android.provider.MediaStore
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
@@ -12,18 +10,23 @@ import androidx.core.app.NotificationCompat
  * notification, whether the app is open, backgrounded, or the screen is
  * off. Needs "Notification access" granted once in Settings.
  *
- * IMPORTANT: WhatsApp bundles rapid messages into ONE updated notification
- * (e.g. showing "2 new messages" as the visible summary) rather than
- * always posting a separate notification per message. Reading just the
- * top-level title/text - which an earlier version of this did - only
- * captures that summary line and loses the individual messages.
+ * IMAGES ONLY for this version - text handling is deferred to the next
+ * version so image detection can be made fully reliable first, given the
+ * expected volume across individual contacts and groups.
  *
- * The fix: notifications from messaging apps carry a structured
- * MessagingStyle payload with EACH individual message (sender, text, and
- * for media messages, a direct content:// URI to the actual file) even
- * when the visible summary is collapsed. We extract that instead of the
- * summary text, so every message in a burst is captured individually,
- * in order, with its real sender name - not just the last-seen summary.
+ * WhatsApp bundles rapid messages into ONE updated notification (e.g.
+ * showing "2 new messages" as the visible summary) rather than always
+ * posting a separate notification per message. We read the structured
+ * MessagingStyle payload (which lists each individual message) instead
+ * of the summary text, so a burst of images is never collapsed into one
+ * missed/garbled entry.
+ *
+ * For the actual image file, this always resolves through
+ * WhatsAppImageScanner (a MediaStore query) rather than trusting
+ * WhatsApp's own notification dataUri directly - that keeps the dedupe
+ * key ("media-id:<id>") identical to what the periodic safety-net poll
+ * uses, which is what guarantees an image is never queued (and never
+ * printed) twice even though two independent paths can both find it.
  */
 class WhatsAppNotificationListener : NotificationListenerService() {
 
@@ -44,9 +47,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         sbn ?: return
         if (sbn.packageName !in WHATSAPP_PACKAGES) return
 
-        // Skip pure summary/group-bundle notifications - the real content
-        // comes from the per-conversation notification's MessagingStyle,
-        // which we read below regardless of whether it's also "grouped".
         if (sbn.notification.flags and android.app.Notification.FLAG_GROUP_SUMMARY != 0) {
             Log.d(TAG, "Skipping group summary notification")
             return
@@ -58,89 +58,47 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         if (messagingStyle != null) {
             handleMessagingStyle(messagingStyle, sbn.postTime)
         } else {
-            // Not a conversation-style notification (e.g. WhatsApp's own
-            // "backup complete" or generic app notification) - ignore.
             Log.d(TAG, "Notification has no MessagingStyle payload, skipping")
         }
     }
 
     private fun handleMessagingStyle(style: NotificationCompat.MessagingStyle, postTimeMs: Long) {
-        // style.messages contains the full recent history shown in this
-        // notification, INCLUDING ones we may have already queued on a
-        // previous update - dedupe by (sender + text + timestamp).
         for (message in style.messages) {
             val sender = message.person?.name?.toString()
                 ?: style.conversationTitle?.toString()
                 ?: "Unknown"
             val timestamp = message.timestamp
             val text = message.text?.toString()
-            val imageUri = message.dataUri
-            val isImage = imageUri != null && message.dataMimeType?.startsWith("image/") == true
+            val looksLikeImage = message.dataMimeType?.startsWith("image/") == true ||
+                    (text.isNullOrBlank()) // WhatsApp often leaves text empty for a pure image message
 
-            val dedupeKey = "$sender:${text ?: imageUri}:$timestamp"
+            val dedupeKey = "burst:$sender:${text ?: "image"}:$timestamp"
             if (dedupeKey in processedMessageKeys) continue
             processedMessageKeys.add(dedupeKey)
             trimProcessedKeysIfNeeded()
 
-            if (isImage) {
-                queueManager.onItemReceived(
-                    sourceKey = "notif-msg:$dedupeKey",
-                    type = "IMAGE",
-                    senderNumber = sender,
-                    imagePath = imageUri.toString(),
-                    textBody = null
-                )
-            } else if (!text.isNullOrBlank()) {
-                queueManager.onItemReceived(
-                    sourceKey = "notif-msg:$dedupeKey",
-                    type = "TEXT",
-                    senderNumber = sender,
-                    imagePath = null,
-                    textBody = text
-                )
-            } else {
-                // Some WhatsApp versions send an image message with no
-                // dataUri in the notification at all - fall back to the
-                // MediaStore lookup as a best-effort for those cases.
-                val fallback = findNewestWhatsAppImageSince(postTimeMs - 5000)
-                if (fallback != null) {
-                    queueManager.onItemReceived(
-                        sourceKey = "mediastore:${fallback.first}",
-                        type = "IMAGE",
-                        senderNumber = sender,
-                        imagePath = fallback.second,
-                        textBody = null
+            if (looksLikeImage) {
+                // Small grace delay so WhatsApp finishes writing the file
+                // to MediaStore before we query for it.
+                android.os.Handler(mainLooper).postDelayed({
+                    WhatsAppImageScanner.scanForNewImages(
+                        context = applicationContext,
+                        queueManager = queueManager,
+                        sinceMs = postTimeMs - 5000,
+                        senderNumber = sender
                     )
-                }
+                }, 1500)
+            } else {
+                Log.d(TAG, "Skipping text message (deferred to next version): $sender")
             }
         }
     }
 
-    // Keep the dedupe set from growing forever across a long-running service.
     private fun trimProcessedKeysIfNeeded() {
         if (processedMessageKeys.size > 500) {
             val excess = processedMessageKeys.size - 300
             processedMessageKeys.toList().take(excess).forEach { processedMessageKeys.remove(it) }
         }
-    }
-
-    private fun findNewestWhatsAppImageSince(sinceMs: Long): Pair<Long, String>? {
-        val collection = MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        val projection = arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED)
-        val selection = "${MediaStore.Images.Media.DATE_ADDED} > ? AND " +
-                "(${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? OR " +
-                "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?)"
-        val selectionArgs = arrayOf((sinceMs / 1000).toString(), "%WhatsApp Images%", "%WhatsApp Business%")
-        val sortOrder = "${MediaStore.Images.Media.DATE_ADDED} DESC"
-
-        contentResolver.query(collection, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID))
-                val uri = ContentUris.withAppendedId(collection, id)
-                return id to uri.toString()
-            }
-        }
-        return null
     }
 
     override fun onListenerConnected() {
