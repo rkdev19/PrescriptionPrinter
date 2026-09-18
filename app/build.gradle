@@ -17,10 +17,10 @@ android {
     }
 
     buildTypes {
-        release {
-            isMinifyEnabled = false
-        }
+    release {
+        minifyEnabled false
     }
+}
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
