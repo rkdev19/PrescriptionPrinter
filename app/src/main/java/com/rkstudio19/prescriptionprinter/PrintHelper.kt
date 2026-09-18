@@ -35,13 +35,81 @@ object PrintHelper {
     private const val EPSON_IP = "192.168.1.50"
     private const val CANON_IP = "192.168.1.51"
 
+    // TEST MODE: no printer configured yet. Instead of attempting a real
+    // print, saves the composed A4 PDF to Downloads so the layout (image
+    // positioning, sizing, text formatting) can be checked by eye before
+    // any printer is wired up. Flip to false once EPSON_IP/CANON_IP are
+    // real and you're ready to test actual printing.
+    private const val DEBUG_SAVE_INSTEAD_OF_PRINT = true
+
     fun printPdf(context: android.content.Context, pdfPath: String, jobName: String): Boolean {
+        if (DEBUG_SAVE_INSTEAD_OF_PRINT) {
+            return saveToDownloadsForPreview(context, pdfPath, jobName)
+        }
         val pdfBytes = java.io.File(pdfPath).readBytes()
         // Try Epson first, then Canon, as a simple "whichever printer is on" strategy.
         // Refine to explicit printer selection once he confirms which printer
         // should handle prescriptions vs other jobs.
         return sendIppPrintJob(EPSON_IP, pdfBytes, jobName)
             || sendIppPrintJob(CANON_IP, pdfBytes, jobName)
+    }
+
+    /**
+     * Copies the composed sheet into the public Downloads folder (visible
+     * to any file manager / PDF viewer) instead of printing, and shows a
+     * notification so it's easy to find. Lets you check exactly how 2
+     * images (or an image + text) land on the A4 layout without needing
+     * a printer connected at all.
+     */
+    private fun saveToDownloadsForPreview(context: android.content.Context, pdfPath: String, jobName: String): Boolean {
+        return try {
+            val safeName = "PRESCRIPTION_PREVIEW_${jobName.replace(" ", "_")}.pdf"
+            val resolver = context.contentResolver
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safeName)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+            }
+            val collection = android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val uri = resolver.insert(collection, values) ?: return false
+
+            resolver.openOutputStream(uri)?.use { out ->
+                java.io.File(pdfPath).inputStream().use { it.copyTo(out) }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+
+            notifyPreviewSaved(context, safeName)
+            Log.d(TAG, "TEST MODE: saved preview PDF to Downloads/$safeName instead of printing")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save preview PDF: ${e.message}")
+            false
+        }
+    }
+
+    private fun notifyPreviewSaved(context: android.content.Context, fileName: String) {
+        val channelId = "print_preview"
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                channelId, "Print previews", android.app.NotificationManager.IMPORTANCE_DEFAULT
+            )
+            val manager = context.getSystemService(android.app.NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+        val notification = android.app.Notification.Builder(context, channelId)
+            .setContentTitle("Prescription sheet ready (TEST MODE)")
+            .setContentText("Saved to Downloads/$fileName — open it to check the layout")
+            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setAutoCancel(true)
+            .build()
+        val manager = context.getSystemService(android.app.NotificationManager::class.java)
+        manager.notify(fileName.hashCode(), notification)
     }
 
     private fun sendIppPrintJob(printerIp: String, pdfBytes: ByteArray, jobName: String): Boolean {
