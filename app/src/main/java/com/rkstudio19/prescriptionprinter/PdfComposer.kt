@@ -6,6 +6,8 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
+import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 
@@ -16,6 +18,7 @@ import java.io.FileOutputStream
  */
 object PdfComposer {
 
+    private const val TAG = "PdfComposer"
     private const val PAGE_WIDTH = 595
     private const val PAGE_HEIGHT = 842
     private const val MARGIN = 24f
@@ -27,8 +30,8 @@ object PdfComposer {
         val canvas = page.canvas
 
         val halfHeight = (PAGE_HEIGHT - MARGIN * 3) / 2
-        drawItem(canvas, a, RectF(MARGIN, MARGIN, PAGE_WIDTH - MARGIN, MARGIN + halfHeight))
-        drawItem(canvas, b, RectF(MARGIN, MARGIN * 2 + halfHeight, PAGE_WIDTH - MARGIN, MARGIN * 2 + halfHeight * 2))
+        drawItem(context, canvas, a, RectF(MARGIN, MARGIN, PAGE_WIDTH - MARGIN, MARGIN + halfHeight))
+        drawItem(context, canvas, b, RectF(MARGIN, MARGIN * 2 + halfHeight, PAGE_WIDTH - MARGIN, MARGIN * 2 + halfHeight * 2))
 
         document.finishPage(page)
         return saveAndClose(context, document, "sheet_${a.id}_${b.id}")
@@ -41,18 +44,21 @@ object PdfComposer {
         val canvas = page.canvas
 
         val halfHeight = (PAGE_HEIGHT - MARGIN * 3) / 2
-        drawItem(canvas, item, RectF(MARGIN, MARGIN, PAGE_WIDTH - MARGIN, MARGIN + halfHeight))
+        drawItem(context, canvas, item, RectF(MARGIN, MARGIN, PAGE_WIDTH - MARGIN, MARGIN + halfHeight))
 
         document.finishPage(page)
         return saveAndClose(context, document, "single_${item.id}")
     }
 
-    private fun drawItem(canvas: Canvas, item: QueueItem, bounds: RectF) {
+    private fun drawItem(context: Context, canvas: Canvas, item: QueueItem, bounds: RectF) {
         val borderPaint = Paint().apply { style = Paint.Style.STROKE; strokeWidth = 0.5f; color = 0xFFCCCCCC.toInt() }
         canvas.drawRect(bounds, borderPaint)
 
         if (item.type == "IMAGE" && item.imagePath != null) {
-            val bitmap = BitmapFactory.decodeFile(item.imagePath) ?: return
+            val bitmap = decodeImage(context, item.imagePath) ?: run {
+                Log.e(TAG, "Could not decode image: ${item.imagePath}")
+                return
+            }
             val scale = minOf(bounds.width() / bitmap.width, bounds.height() / bitmap.height)
             val w = bitmap.width * scale
             val h = bitmap.height * scale
@@ -67,13 +73,32 @@ object PdfComposer {
             val header = "From: ${item.senderNumber ?: "Unknown"}"
             canvas.drawText(header, bounds.left + 8f, y, headerPaint)
             y += 20f
-            // naive word-wrap within the box width
             val maxWidth = bounds.width() - 16f
             for (line in wrapText(item.textBody.orEmpty(), bodyPaint, maxWidth)) {
                 if (y > bounds.bottom - 8f) break
                 canvas.drawText(line, bounds.left + 8f, y, bodyPaint)
                 y += 16f
             }
+        }
+    }
+
+    /**
+     * imagePath may be a plain file path (legacy) or a content:// URI
+     * (what MediaStore queries now return, needed for Android 13 scoped
+     * storage) - handle both.
+     */
+    private fun decodeImage(context: Context, imagePath: String): android.graphics.Bitmap? {
+        return try {
+            if (imagePath.startsWith("content://")) {
+                context.contentResolver.openInputStream(Uri.parse(imagePath))?.use {
+                    BitmapFactory.decodeStream(it)
+                }
+            } else {
+                BitmapFactory.decodeFile(imagePath)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "decodeImage failed for $imagePath: ${e.message}")
+            null
         }
     }
 

@@ -33,17 +33,24 @@ class MainActivity : AppCompatActivity() {
     // Android 13+ requires this to be granted at runtime before a visible
     // notification (including our persistent foreground-service one) will show.
     private fun requestNotificationPermissionIfNeeded() {
+        val permissionsToRequest = mutableListOf<String>()
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            val granted = ContextCompat.checkSelfPermission(
+            val notifGranted = ContextCompat.checkSelfPermission(
                 this, Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    notificationPermissionRequestCode
-                )
-            }
+            if (!notifGranted) permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
+
+            val imagesGranted = ContextCompat.checkSelfPermission(
+                this, Manifest.permission.READ_MEDIA_IMAGES
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!imagesGranted) permissionsToRequest.add(Manifest.permission.READ_MEDIA_IMAGES)
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this, permissionsToRequest.toTypedArray(), notificationPermissionRequestCode
+            )
         }
     }
 
