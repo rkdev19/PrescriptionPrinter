@@ -17,10 +17,10 @@ data class QueueItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sourceKey: String,
     val type: String,          // "IMAGE" or "TEXT"
-    val senderNumber: String?,
-    val imagePath: String?,    // set when type == IMAGE
+    val senderNumber: String?, // now populated from the WhatsApp notification title (contact name)
+    val imagePath: String?,    // set when type == IMAGE (content:// URI)
     val textBody: String?,     // set when type == TEXT
-    val receivedAt: Long,      // System.currentTimeMillis()
+    val receivedAt: Long,      // System.currentTimeMillis() - also doubles as arrival order
     val status: String = "PENDING", // PENDING -> PRINTED
     val printedAt: Long? = null
 )

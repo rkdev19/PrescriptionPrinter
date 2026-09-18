@@ -59,18 +59,24 @@ object PdfComposer {
                 Log.e(TAG, "Could not decode image: ${item.imagePath}")
                 return
             }
-            val scale = minOf(bounds.width() / bitmap.width, bounds.height() / bitmap.height)
+            val labelPaint = Paint().apply { textSize = 9f; color = 0xFF666666.toInt() }
+            val label = "#${item.id} — ${item.senderNumber ?: "Unknown sender"}"
+            canvas.drawText(label, bounds.left + 4f, bounds.top + 10f, labelPaint)
+            val imageTop = bounds.top + 14f
+            val imageBounds = RectF(bounds.left, imageTop, bounds.right, bounds.bottom)
+
+            val scale = minOf(imageBounds.width() / bitmap.width, imageBounds.height() / bitmap.height)
             val w = bitmap.width * scale
             val h = bitmap.height * scale
-            val left = bounds.left + (bounds.width() - w) / 2
-            val top = bounds.top + (bounds.height() - h) / 2
+            val left = imageBounds.left + (imageBounds.width() - w) / 2
+            val top = imageBounds.top + (imageBounds.height() - h) / 2
             val destRect = RectF(left, top, left + w, top + h)
             canvas.drawBitmap(bitmap, null, destRect, null)
         } else if (item.type == "TEXT") {
             val headerPaint = Paint().apply { textSize = 12f; isFakeBoldText = true; color = 0xFF000000.toInt() }
             val bodyPaint = Paint().apply { textSize = 11f; color = 0xFF000000.toInt() }
             var y = bounds.top + 20f
-            val header = "From: ${item.senderNumber ?: "Unknown"}"
+            val header = "#${item.id} — From: ${item.senderNumber ?: "Unknown"}"
             canvas.drawText(header, bounds.left + 8f, y, headerPaint)
             y += 20f
             val maxWidth = bounds.width() - 16f

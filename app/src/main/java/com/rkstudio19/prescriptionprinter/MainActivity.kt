@@ -24,6 +24,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
+        findViewById<Button>(R.id.grantNotificationAccessButton).setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
         findViewById<Button>(R.id.startServiceButton).setOnClickListener {
             requestNotificationPermissionIfNeeded()
             startPrintQueueService()
