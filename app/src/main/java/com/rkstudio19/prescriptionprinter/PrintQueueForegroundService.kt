@@ -29,6 +29,7 @@ class PrintQueueForegroundService : Service() {
         queueManager = PrintQueueManager(applicationContext)
         lastPollTimeMs = System.currentTimeMillis()
         startSafetyNetPolling()
+        PrinterDiscovery.start(applicationContext)
     }
 
     /**
@@ -64,6 +65,7 @@ class PrintQueueForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         pollHandler.removeCallbacksAndMessages(null)
+        PrinterDiscovery.stop(applicationContext)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

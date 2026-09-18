@@ -21,25 +21,18 @@ import java.net.URL
  * is printPdfViaSystemDialog below, which works everywhere but needs one
  * tap per sheet.
  *
- * PRINTER_IP must be set to each printer's static/reserved LAN IP -
- * ask him to set a DHCP reservation for both printers on his router so
- * these don't drift.
+ * Printer IP is no longer hardcoded - PrinterDiscovery finds it live via
+ * mDNS on whatever network the phone is on (needed since the client's
+ * printer sits on a Jio dongle's Wi-Fi network, which hands out dynamic
+ * IPs, not a fixed home-router reservation).
  */
 object PrintHelper {
 
     private const val TAG = "PrintHelper"
-    private const val IPP_PORT = 631
 
-    // TODO: fill in once his printers are on the network - use a DHCP
-    // reservation so these don't change.
-    private const val EPSON_IP = "192.168.1.50"
-    private const val CANON_IP = "192.168.1.51"
-
-    // TEST MODE: no printer configured yet. Instead of attempting a real
-    // print, saves the composed A4 PDF to Downloads so the layout (image
-    // positioning, sizing, text formatting) can be checked by eye before
-    // any printer is wired up. Flip to false once EPSON_IP/CANON_IP are
-    // real and you're ready to test actual printing.
+    // TEST MODE: instead of attempting a real print, saves the composed
+    // A4 PDF to Downloads so the layout can be checked by eye. Flip to
+    // false once ready to test actual printing.
     private const val DEBUG_SAVE_INSTEAD_OF_PRINT = true
 
     fun printPdf(context: android.content.Context, pdfPath: String, jobName: String): Boolean {
@@ -47,11 +40,18 @@ object PrintHelper {
             return saveToDownloadsForPreview(context, pdfPath, jobName)
         }
         val pdfBytes = java.io.File(pdfPath).readBytes()
-        // Try Epson first, then Canon, as a simple "whichever printer is on" strategy.
-        // Refine to explicit printer selection once he confirms which printer
-        // should handle prescriptions vs other jobs.
-        return sendIppPrintJob(EPSON_IP, pdfBytes, jobName)
-            || sendIppPrintJob(CANON_IP, pdfBytes, jobName)
+
+        val epson = PrinterDiscovery.findPrinter("epson")
+        val canon = PrinterDiscovery.findPrinter("canon")
+
+        if (epson == null && canon == null) {
+            Log.w(TAG, "No printer discovered on the network yet - discovered so far: ${PrinterDiscovery.allDiscovered()}")
+            return false
+        }
+
+        val epsonSent = epson?.let { sendIppPrintJob(it.host, it.port, pdfBytes, jobName) } ?: false
+        if (epsonSent) return true
+        return canon?.let { sendIppPrintJob(it.host, it.port, pdfBytes, jobName) } ?: false
     }
 
     /**
@@ -112,9 +112,9 @@ object PrintHelper {
         manager.notify(fileName.hashCode(), notification)
     }
 
-    private fun sendIppPrintJob(printerIp: String, pdfBytes: ByteArray, jobName: String): Boolean {
+    private fun sendIppPrintJob(printerIp: String, printerPort: Int, pdfBytes: ByteArray, jobName: String): Boolean {
         return try {
-            val url = URL("http://$printerIp:$IPP_PORT/ipp/print")
+            val url = URL("http://$printerIp:$printerPort/ipp/print")
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "POST"
             conn.doOutput = true
@@ -122,14 +122,14 @@ object PrintHelper {
             conn.connectTimeout = 5000
             conn.readTimeout = 10000
 
-            val ippRequest = buildIppPrintJobRequest(printerIp, jobName, pdfBytes)
+            val ippRequest = buildIppPrintJobRequest(printerIp, printerPort, jobName, pdfBytes)
             DataOutputStream(conn.outputStream).use { it.write(ippRequest) }
 
             val responseCode = conn.responseCode
-            Log.d(TAG, "IPP response from $printerIp: $responseCode")
+            Log.d(TAG, "IPP response from $printerIp:$printerPort: $responseCode")
             responseCode == 200
         } catch (e: Exception) {
-            Log.w(TAG, "IPP print to $printerIp failed: ${e.message}")
+            Log.w(TAG, "IPP print to $printerIp:$printerPort failed: ${e.message}")
             false
         }
     }
@@ -139,7 +139,7 @@ object PrintHelper {
      * RFC 8010 - version, operation, request-id, operation-attributes-group,
      * end-of-attributes-tag, then the raw PDF as the document body.
      */
-    private fun buildIppPrintJobRequest(printerIp: String, jobName: String, pdfBytes: ByteArray): ByteArray {
+    private fun buildIppPrintJobRequest(printerIp: String, printerPort: Int, jobName: String, pdfBytes: ByteArray): ByteArray {
         val out = ByteArrayOutputStream()
         val d = DataOutputStream(out)
 
@@ -150,7 +150,7 @@ object PrintHelper {
         d.writeByte(0x01)                           // operation-attributes-tag
         writeAttribute(d, 0x47, "attributes-charset", "utf-8")
         writeAttribute(d, 0x48, "attributes-natural-language", "en")
-        writeAttribute(d, 0x45, "printer-uri", "ipp://$printerIp:$IPP_PORT/ipp/print")
+        writeAttribute(d, 0x45, "printer-uri", "ipp://$printerIp:$printerPort/ipp/print")
         writeAttribute(d, 0x42, "job-name", jobName)
         writeAttribute(d, 0x49, "document-format", "application/pdf")
 
