@@ -46,14 +46,12 @@ class WhatsAppAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        event ?: return
-
-        checkForNewImagesViaMediaStore()
-
-        val text = event.text?.joinToString(" ")?.trim()
-        if (!text.isNullOrEmpty()) {
-            maybeQueueText(text, event.packageName?.toString())
-        }
+        // Detection now happens in WhatsAppNotificationListener, which is
+        // more reliable (works backgrounded, gives real sender names via
+        // MessagingStyle, doesn't misread stray UI text as a message).
+        // This service is kept installed/enabled as a dormant fallback
+        // only - intentionally not acting on events right now.
+        return
     }
 
     override fun onInterrupt() {}
