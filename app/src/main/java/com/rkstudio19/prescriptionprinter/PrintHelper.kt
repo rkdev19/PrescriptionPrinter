@@ -31,9 +31,9 @@ object PrintHelper {
     private const val TAG = "PrintHelper"
 
     // TEST MODE: instead of attempting a real print, saves the composed
-    // A4 PDF to Downloads so the layout can be checked by eye. Flip to
-    // false once ready to test actual printing.
-    private const val DEBUG_SAVE_INSTEAD_OF_PRINT = true
+    // A4 PDF to Downloads so the layout can be checked by eye. OFF now -
+    // this build goes to the client to test against the real printer.
+    private const val DEBUG_SAVE_INSTEAD_OF_PRINT = false
 
     fun printPdf(context: android.content.Context, pdfPath: String, jobName: String): Boolean {
         if (DEBUG_SAVE_INSTEAD_OF_PRINT) {

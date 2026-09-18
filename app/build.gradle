@@ -29,6 +29,14 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // Rename the built APK from the generic "app-debug.apk" to something
+    // clear before it goes to the client for real-printer testing.
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            output.outputFileName = "PrescriptionPrinter-v${variant.versionName}-${variant.buildType.name}.apk"
+        }
+    }
 }
 
 dependencies {

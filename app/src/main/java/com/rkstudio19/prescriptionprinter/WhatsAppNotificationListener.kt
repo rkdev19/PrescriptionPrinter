@@ -89,8 +89,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             trimProcessedKeysIfNeeded()
 
             if (looksLikeImage) {
-                // Small grace delay so WhatsApp finishes writing the file
-                // to MediaStore before we query for it.
+                // Register the sender immediately, before we even go looking
+                // for the file - this is what lets the safety-net poll (if
+                // it happens to find the file first) still attribute it
+                // correctly instead of showing "Unknown".
+                PendingSenderRegistry.addPending(timestamp, sender)
+
                 android.os.Handler(mainLooper).postDelayed({
                     WhatsAppImageScanner.scanForNewImages(
                         context = applicationContext,

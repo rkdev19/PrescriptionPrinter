@@ -40,13 +40,22 @@ object WhatsAppImageScanner {
         try {
             context.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
                 val idCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+                val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idCol)
+                    val dateAddedMs = cursor.getLong(dateCol) * 1000
                     val uri = ContentUris.withAppendedId(collection, id)
+
+                    // If we weren't handed a sender directly (the safety-net
+                    // poll case), try matching this file's timestamp against
+                    // a recently registered notification sender.
+                    val resolvedSender = senderNumber
+                        ?: PendingSenderRegistry.consumeNearestSender(dateAddedMs)
+
                     queueManager.onItemReceived(
                         sourceKey = "media-id:$id", // SAME key format used everywhere - this is what prevents double-printing
                         type = "IMAGE",
-                        senderNumber = senderNumber,
+                        senderNumber = resolvedSender,
                         imagePath = uri.toString(),
                         textBody = null
                     )
